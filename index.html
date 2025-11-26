@@ -1,262 +1,310 @@
-<!doctype html>
-<!-- Simple mining game: click blocks to break them.
-    Materials: Stone, Iron, Diamond, Tungsten
-    Starter pickaxe: Wood (can mine Stone)
-    Every 2 mined blocks of a material unlock that material's pickaxe.
-    Higher-tier pickaxes mine lower-tier blocks faster.
--->
-<html>
-<head>
-<meta charset="utf-8" />
-<title>Mining Game</title>
-<style>
-  html,body{height:100%;margin:0;font-family:Arial;background:#222;color:#ddd}
-  #ui{display:flex;gap:12px;padding:12px;align-items:center}
-  canvas{background:#111;display:block;margin:0 auto;box-shadow:0 0 10px #000}
-  .panel{background:#1a1a1a;padding:8px;border-radius:6px}
-  button{padding:6px 10px;border-radius:4px;border:none;background:#2a6;cursor:pointer}
-  .small{font-size:13px;color:#bbb}
-</style>
-</head>
-<body>
-<div id="ui">
-  <div class="panel">
-    <div><strong>Pickaxe:</strong> <span id="pickName">Wood</span></div>
-    <div class="small">Damage multiplier: <span id="pickMult">1.0</span></div>
-  </div>
-  <div class="panel">
-    <div><strong>Inventory (mined)</strong></div>
-    <div class="small">Stone: <span id="cntStone">0</span></div>
-    <div class="small">Iron: <span id="cntIron">0</span></div>
-    <div class="small">Diamond: <span id="cntDiamond">0</span></div>
-    <div class="small">Tungsten: <span id="cntTungsten">0</span></div>
-  </div>
-  <div class="panel">
-    <div><strong>Unlocked Picks</strong></div>
-    <div class="small" id="unlocked">Wood</div>
-  </div>
-  <div class="panel">
-    <div><strong>Tips</strong></div>
-    <div class="small">Click blocks to deal damage (base 20%).</div>
-    <div class="small">Mine 2 of a material to unlock its pickaxe.</div>
-  </div>
-  <div style="flex:1"></div>
-  <button id="regen">Regenerate Map</button>
-</div>
+// AetherDriftCore.cs
+// Single-file starter systems for "Aether Drift: Echoes of the Glass Labyrinth"
+// Attachables for Unity (3D). Lightweight, extensible foundation for Phase-Shift, PrismKeys,
+// HolographicProjectors (level geometry), EchoMemory pickups, and a CrystalSentinel enemy.
 
-<canvas id="c" width="800" height="480"></canvas>
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.Events;
 
-<script>
-/* Config */
-const COLS = 16, ROWS = 10;
-const TILE = 40;
-const BASE_DAMAGE_PERCENT = 20; // default per click
-const UNLOCK_REQ = 2; // blocks needed to unlock a pickaxe
+namespace AetherDrift
+{
+    // Global events for Aether state changes
+    public static class LabyrinthEvents
+    {
+        public static event Action OnEnterAether;
+        public static event Action OnExitAether;
 
-/* Material definitions (higher tier = rarer & harder to mine by low-tier picks) */
-const MATERIALS = [
-  // id, name, color, tier (1=common -> 4=rarest)
-  {id: 'stone', name:'Stone', color:'#6d6d6d', tier:1, prob:0.72},
-  {id: 'iron', name:'Iron', color:'#c38b3a', tier:2, prob:0.18},
-  {id: 'diamond', name:'Diamond', color:'#39d0ff', tier:3, prob:0.08},
-  {id: 'tungsten', name:'Tungsten', color:'#3b3f46', tier:4, prob:0.02}
-];
-
-/* Pickaxe definitions: tier determines which materials it can damage (tier >= material.tier).
-   Multipliers increase with higher-tier picks so they break lower materials faster. */
-const PICKAXES = {
-  wood: {name:'Wood', tier:1, mult:1.0},
-  stone: {name:'Stone', tier:1, mult:1.2},
-  iron: {name:'Iron', tier:2, mult:1.6},
-  diamond: {name:'Diamond', tier:3, mult:2.4},
-  tungsten: {name:'Tungsten', tier:4, mult:3.0}
-};
-
-/* Game state */
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
-let grid = [];
-let picked = 'wood';
-let unlocked = new Set(['wood']);
-let minedCounts = {stone:0, iron:0, diamond:0, tungsten:0};
-
-/* UI refs */
-const pickNameEl = document.getElementById('pickName');
-const pickMultEl = document.getElementById('pickMult');
-const cntStoneEl = document.getElementById('cntStone');
-const cntIronEl = document.getElementById('cntIron');
-const cntDiamondEl = document.getElementById('cntDiamond');
-const cntTungstenEl = document.getElementById('cntTungsten');
-const unlockedEl = document.getElementById('unlocked');
-const regenBtn = document.getElementById('regen');
-
-/* Helpers */
-function randMaterialByProb() {
-  const r = Math.random();
-  let acc = 0;
-  for (const m of MATERIALS) {
-    acc += m.prob;
-    if (r < acc) return m;
-  }
-  return MATERIALS[0];
-}
-
-function makeGrid() {
-  grid = [];
-  for (let y=0;y<ROWS;y++){
-    const row=[];
-    for (let x=0;x<COLS;x++){
-     const mat = randMaterialByProb();
-     row.push({matId:mat.id, hp:100});
+        public static void InvokeEnterAether() => OnEnterAether?.Invoke();
+        public static void InvokeExitAether() => OnExitAether?.Invoke();
     }
-    grid.push(row);
-  }
-}
-makeGrid();
 
-/* Drawing */
-function draw() {
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  // draw grid
-  for (let y=0;y<ROWS;y++){
-    for (let x=0;x<COLS;x++){
-     const t = grid[y][x];
-     const m = MATERIALS.find(mm=>mm.id===t.matId);
-     const px = x*TILE + 20;
-     const py = y*TILE + 60;
-     // tile background
-     ctx.fillStyle = '#222';
-     ctx.fillRect(px,py,TILE-2,TILE-2);
-     // ore block
-     ctx.fillStyle = m.color;
-     ctx.fillRect(px+2,py+2,TILE-6,TILE-6);
-     // overlay dim if partially broken
-     const broken = 1 - (t.hp/100);
-     if (broken>0){
-       ctx.fillStyle = 'rgba(0,0,0,' + Math.min(0.9, broken)+')';
-       ctx.fillRect(px+2,py+2,TILE-6,TILE-6);
-     }
-     // HP bar
-     ctx.fillStyle = '#000';
-     ctx.fillRect(px+2,py+TILE-8,TILE-6,5);
-     ctx.fillStyle = '#0f0';
-     ctx.fillRect(px+2,py+TILE-8,(TILE-6)*(t.hp/100),5);
-     // name small
-     ctx.fillStyle = '#fff';
-     ctx.font = '10px Arial';
-     ctx.fillText(m.name, px+4, py+12);
+    // Player/Shard controller: handles movement stub and Phase-Shift ability
+    public class ShardController : MonoBehaviour
+    {
+        [Header("Phase-Shift")]
+        public float phaseDuration = 2f;
+        public float phaseCooldown = 3f;
+        public Color aetherTint = new Color(0.6f, 0.8f, 1f, 0.5f);
+
+        bool isPhasing = false;
+        bool canPhase = true;
+        float cooldownTimer = 0f;
+
+        Renderer[] renderers;
+        List<Material[]> originalMaterials = new List<Material[]>();
+
+        void Start()
+        {
+            renderers = GetComponentsInChildren<Renderer>();
+            foreach (var r in renderers)
+            {
+                originalMaterials.Add(r.sharedMaterials);
+            }
+        }
+
+        void Update()
+        {
+            // Replace with input system binding as needed.
+            if (Input.GetKeyDown(KeyCode.E) && canPhase)
+            {
+                StartCoroutine(PhaseRoutine());
+            }
+
+            if (!canPhase)
+            {
+                cooldownTimer -= Time.deltaTime;
+                if (cooldownTimer <= 0f)
+                {
+                    canPhase = true;
+                }
+            }
+        }
+
+        IEnumerator PhaseRoutine()
+        {
+            isPhasing = true;
+            canPhase = false;
+            cooldownTimer = phaseCooldown;
+            ApplyAetherVisuals(true);
+            LabyrinthEvents.InvokeEnterAether();
+
+            yield return new WaitForSeconds(phaseDuration);
+
+            ApplyAetherVisuals(false);
+            LabyrinthEvents.InvokeExitAether();
+            isPhasing = false;
+        }
+
+        void ApplyAetherVisuals(bool enter)
+        {
+            // Simple tint/material switch to hint the state; replace with shader toggles for production
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                var r = renderers[i];
+                if (enter)
+                {
+                    Material[] mats = new Material[r.sharedMaterials.Length];
+                    for (int m = 0; m < mats.Length; m++)
+                    {
+                        var mat = new Material(r.sharedMaterials[m]);
+                        if (mat.HasProperty("_Color"))
+                        {
+                            mat.color = mat.color * aetherTint;
+                        }
+                        mats[m] = mat;
+                    }
+                    r.materials = mats;
+                }
+                else
+                {
+                    r.materials = originalMaterials[i];
+                }
+            }
+        }
+
+        // Expose convenience property
+        public bool IsPhasing => isPhasing;
     }
-  }
 
-  // draw player as green blob
-  ctx.beginPath();
-  ctx.fillStyle = '#2ecc71';
-  ctx.arc(60,30,18,0,Math.PI*2);
-  ctx.fill();
-  ctx.fillStyle='#033'; ctx.fillRect(46,30,28,6); // little "mouth"
-  // HUD updates
-  pickNameEl.textContent = PICKAXES[picked].name;
-  pickMultEl.textContent = PICKAXES[picked].mult.toFixed(2);
-  cntStoneEl.textContent = minedCounts.stone;
-  cntIronEl.textContent = minedCounts.iron;
-  cntDiamondEl.textContent = minedCounts.diamond;
-  cntTungstenEl.textContent = minedCounts.tungsten;
-  unlockedEl.textContent = Array.from(unlocked).map(k=>PICKAXES[k].name).join(', ');
-}
-
-canvas.addEventListener('click', (ev)=>{
-  const rect = canvas.getBoundingClientRect();
-  const mx = ev.clientX - rect.left;
-  const my = ev.clientY - rect.top;
-  // find clicked tile
-  for (let y=0;y<ROWS;y++){
-    for (let x=0;x<COLS;x++){
-     const px = x*TILE + 20;
-     const py = y*TILE + 60;
-     if (mx >= px && mx <= px+TILE-2 && my >= py && my <= py+TILE-2){
-       handleClickTile(x,y);
-       return;
-     }
+    // Interface for objects reacting to Aether enter/exit
+    public interface IAetherInteractive
+    {
+        void OnEnterAether();
+        void OnExitAether();
     }
-  }
-});
 
-function handleClickTile(x,y){
-  const tile = grid[y][x];
-  const mat = MATERIALS.find(m=>m.id===tile.matId);
-  const pick = PICKAXES[picked];
+    // PrismKey: a pickup that tells a HolographicProjector to change geometry
+    public class PrismKey : MonoBehaviour
+    {
+        public string keyId;
+        public HolographicProjector targetProjector;
+        public UnityEvent onPickedUp;
 
-  // can we damage? Only if pick.tier >= material.tier
-  if (pick.tier < mat.tier){
-    // show a small shake / flash
-    flashTile(x,y,'#ff4d4d');
-    return;
-  }
+        bool picked = false;
 
-  // compute damage percent
-  const tierDiff = pick.tier - mat.tier;
-  // higher pick tiers break easier materials faster
-  const bonus = 0.3 * tierDiff; // 30% per tier above
-  const dmgPercent = BASE_DAMAGE_PERCENT * (1 + bonus) * pick.mult;
-  tile.hp -= dmgPercent;
-  if (tile.hp <= 0){
-    // mined
-    onMine(tile.matId);
-    // replace tile with new random material (rare ores remain rarer)
-    const newMat = randMaterialByProb();
-    grid[y][x] = {matId:newMat.id, hp:100};
-  }
-  draw();
-}
-
-function flashTile(x,y,color){
-  const px = x*TILE + 20;
-  const py = y*TILE + 60;
-  const prev = ctx.getImageData(px,py,TILE-2,TILE-2);
-  ctx.fillStyle = color;
-  ctx.fillRect(px,py,TILE-2,TILE-2);
-  setTimeout(()=>{ ctx.putImageData(prev,px,py); draw(); }, 120);
-}
-
-function onMine(matId){
-  if (!minedCounts.hasOwnProperty(matId)) return;
-  minedCounts[matId] += 1;
-  // unlock pickaxe when reaching UNLOCK_REQ
-  if (minedCounts[matId] >= UNLOCK_REQ){
-    // map matId to pick name
-    const mapping = {stone:'stone', iron:'iron', diamond:'diamond', tungsten:'tungsten'};
-    const pickKey = mapping[matId];
-    if (pickKey && !unlocked.has(pickKey)){
-     unlocked.add(pickKey);
-     // auto-equip new pick
-     picked = pickKey;
+        void OnTriggerEnter(Collider other)
+        {
+            if (picked) return;
+            if (other.CompareTag("Player"))
+            {
+                picked = true;
+                onPickedUp?.Invoke();
+                if (targetProjector != null)
+                    targetProjector.ApplyPrismKey(keyId);
+                // Basic pickup feedback
+                Destroy(gameObject);
+            }
+        }
     }
-  }
+
+    // Holds a named geometry state
+    [Serializable]
+    public class GeometryState
+    {
+        public string stateId;
+        public GameObject[] enableObjects;
+        public GameObject[] disableObjects;
+        public float transitionTime = 0.5f;
+    }
+
+    // Holographic projector: swaps groups of objects to reconfigure level geometry
+    public class HolographicProjector : MonoBehaviour
+    {
+        public List<GeometryState> states = new List<GeometryState>();
+        public UnityEvent<string> onStateApplied;
+
+        Dictionary<string, GeometryState> stateMap;
+
+        void Awake()
+        {
+            stateMap = new Dictionary<string, GeometryState>();
+            foreach (var s in states)
+                if (!string.IsNullOrEmpty(s.stateId))
+                    stateMap[s.stateId] = s;
+        }
+
+        public void ApplyPrismKey(string keyId)
+        {
+            if (stateMap.TryGetValue(keyId, out GeometryState s))
+            {
+                StopAllCoroutines();
+                StartCoroutine(ApplyStateRoutine(s));
+                onStateApplied?.Invoke(keyId);
+            }
+            else
+            {
+                Debug.LogWarning($"PrismKey '{keyId}' not found on projector '{name}'");
+            }
+        }
+
+        IEnumerator ApplyStateRoutine(GeometryState state)
+        {
+            // Simple instant toggle with optional placeholder for transitions.
+            foreach (var g in state.disableObjects)
+                if (g != null) g.SetActive(false);
+            yield return new WaitForSeconds(state.transitionTime * 0.5f);
+            foreach (var g in state.enableObjects)
+                if (g != null) g.SetActive(true);
+            yield return new WaitForSeconds(state.transitionTime * 0.5f);
+        }
+    }
+
+    // EchoMemory pickup: collects fragments of the Grand Collapse memory
+    public class EchoMemory : MonoBehaviour
+    {
+        public string memoryId;
+        public string hintText;
+        public UnityEvent<string> onCollected;
+
+        void OnTriggerEnter(Collider other)
+        {
+            if (other.CompareTag("Player"))
+            {
+                // Could add to a player inventory; here we broadcast
+                onCollected?.Invoke(memoryId);
+                // Visual/audio feedback stub
+                Destroy(gameObject);
+            }
+        }
+    }
+
+    // Crystal sentinel enemy with behavior that depends on Aether state
+    public class CrystalSentinel : MonoBehaviour, IAetherInteractive
+    {
+        public float maxHealth = 100f;
+        public float damage = 10f;
+        public bool vulnerableInAether = true;
+        public float aetherVulnerabilityMultiplier = 2f;
+        public Renderer rend;
+        public Color normalColor = Color.white;
+        public Color aetherColor = new Color(0.8f, 0.95f, 1f);
+
+        float currentHealth;
+        bool inAether = false;
+
+        void Start()
+        {
+            currentHealth = maxHealth;
+            if (rend == null) rend = GetComponentInChildren<Renderer>();
+            LabyrinthEvents.OnEnterAether += OnEnterAether;
+            LabyrinthEvents.OnExitAether += OnExitAether;
+            UpdateVisual();
+        }
+
+        void OnDestroy()
+        {
+            LabyrinthEvents.OnEnterAether -= OnEnterAether;
+            LabyrinthEvents.OnExitAether -= OnExitAether;
+        }
+
+        public void OnEnterAether()
+        {
+            inAether = true;
+            UpdateVisual();
+        }
+
+        public void OnExitAether()
+        {
+            inAether = false;
+            UpdateVisual();
+        }
+
+        void UpdateVisual()
+        {
+            if (rend != null && rend.material.HasProperty("_Color"))
+                rend.material.color = inAether ? aetherColor : normalColor;
+        }
+
+        public void ReceiveDamage(float amount)
+        {
+            float actual = amount;
+            if (inAether && vulnerableInAether)
+                actual *= aetherVulnerabilityMultiplier;
+
+            currentHealth -= actual;
+            if (currentHealth <= 0f) Die();
+        }
+
+        void Die()
+        {
+            // Simple death: destroy and spawn shards later
+            Destroy(gameObject);
+        }
+
+        // Example simple melee attack towards player (placeholder)
+        void OnTriggerEnter(Collider other)
+        {
+            if (other.CompareTag("Player"))
+            {
+                // Send damage to player if they have a damage receiver; placeholder
+                // other.GetComponent<PlayerHealth>()?.TakeDamage(damage);
+            }
+        }
+    }
+
+    // Labyrinth manager: tracks collected echoes and global state — a minimal game state holder
+    public class LabyrinthManager : MonoBehaviour
+    {
+        public List<string> collectedMemories = new List<string>();
+        public UnityEvent<string> onMemoryCollected;
+
+        void Awake()
+        {
+            // Hook up to EchoMemory pickups by code or let designer hook events.
+        }
+
+        public void RegisterMemory(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return;
+            if (!collectedMemories.Contains(id))
+            {
+                collectedMemories.Add(id);
+                onMemoryCollected?.Invoke(id);
+                Debug.Log($"Collected EchoMemory: {id} ({collectedMemories.Count})");
+            }
+        }
+    }
 }
-
-/* Simple keyboard support to switch picks among unlocked */
-window.addEventListener('keydown', (e)=>{
-  if (e.key === '1') pickIfUnlocked('wood');
-  if (e.key === '2') pickIfUnlocked('stone');
-  if (e.key === '3') pickIfUnlocked('iron');
-  if (e.key === '4') pickIfUnlocked('diamond');
-  if (e.key === '5') pickIfUnlocked('tungsten');
-  draw();
-});
-function pickIfUnlocked(k){
-  if (unlocked.has(k)) picked = k;
-}
-
-/* regen button */
-regenBtn.addEventListener('click', ()=>{
-  makeGrid();
-  // reset inventory but keep unlocked picks (so progression continues)
-  minedCounts = {stone:0, iron:0, diamond:0, tungsten:0};
-  draw();
-});
-
-/* initial draw */
-draw();
-</script>
-</body>
-</html>
