@@ -1,310 +1,342 @@
-// AetherDriftCore.cs
-// Single-file starter systems for "Aether Drift: Echoes of the Glass Labyrinth"
-// Attachables for Unity (3D). Lightweight, extensible foundation for Phase-Shift, PrismKeys,
-// HolographicProjectors (level geometry), EchoMemory pickups, and a CrystalSentinel enemy.
+// File: AetherDriftCore.cs
+// A compact Unity prototype implementing core systems for "Aether Drift: Echoes of the Glass Labyrinth".
+// Contains: ShardController (Phase-Shift), PrismKey, Projector, LabyrinthManager (geometry change),
+// Sentinel (enemy vulnerability), EchoMemory (collection).
+//
+// Drop into an empty Unity project (one file). Attach components as indicated in comments.
 
-using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.Events;
 
-namespace AetherDrift
+#region Shard (player) and Phase-Shift
+public class ShardController : MonoBehaviour
 {
-    // Global events for Aether state changes
-    public static class LabyrinthEvents
-    {
-        public static event Action OnEnterAether;
-        public static event Action OnExitAether;
+    public static ShardController Instance { get; private set; }
 
-        public static void InvokeEnterAether() => OnEnterAether?.Invoke();
-        public static void InvokeExitAether() => OnExitAether?.Invoke();
+    [Header("Phase-Shift")]
+    public float phaseDuration = 3f;
+    public float phaseCooldown = 2f;
+    public Material aetherMaterial;      // Optional: set a glow/ghost material
+    public Material normalMaterial;      // Optional: original material for quick swap
+    public KeyCode phaseKey = KeyCode.Space;
+
+    bool isPhased = false;
+    bool canPhase = true;
+    Renderer[] renderers;
+    Collider[] colliders;
+
+    void Awake()
+    {
+        Instance = this;
+        renderers = GetComponentsInChildren<Renderer>();
+        colliders = GetComponentsInChildren<Collider>();
     }
 
-    // Player/Shard controller: handles movement stub and Phase-Shift ability
-    public class ShardController : MonoBehaviour
+    void Update()
     {
-        [Header("Phase-Shift")]
-        public float phaseDuration = 2f;
-        public float phaseCooldown = 3f;
-        public Color aetherTint = new Color(0.6f, 0.8f, 1f, 0.5f);
+        if (Input.GetKeyDown(phaseKey) && canPhase)
+            StartCoroutine(PhaseRoutine());
+    }
 
-        bool isPhasing = false;
-        bool canPhase = true;
-        float cooldownTimer = 0f;
+    IEnumerator PhaseRoutine()
+    {
+        canPhase = false;
+        BeginPhase();
+        yield return new WaitForSeconds(phaseDuration);
+        EndPhase();
 
-        Renderer[] renderers;
-        List<Material[]> originalMaterials = new List<Material[]>();
+        yield return new WaitForSeconds(phaseCooldown);
+        canPhase = true;
+    }
 
-        void Start()
-        {
-            renderers = GetComponentsInChildren<Renderer>();
+    void BeginPhase()
+    {
+        isPhased = true;
+        // Visual: swap materials if provided
+        if (aetherMaterial != null)
             foreach (var r in renderers)
-            {
-                originalMaterials.Add(r.sharedMaterials);
-            }
-        }
+                r.material = aetherMaterial;
 
-        void Update()
-        {
-            // Replace with input system binding as needed.
-            if (Input.GetKeyDown(KeyCode.E) && canPhase)
-            {
-                StartCoroutine(PhaseRoutine());
-            }
+        // Physics: make colliders triggers so we can pass through geometry designed to block normal world
+        foreach (var c in colliders)
+            c.isTrigger = true;
 
-            if (!canPhase)
-            {
-                cooldownTimer -= Time.deltaTime;
-                if (cooldownTimer <= 0f)
-                {
-                    canPhase = true;
-                }
-            }
-        }
-
-        IEnumerator PhaseRoutine()
-        {
-            isPhasing = true;
-            canPhase = false;
-            cooldownTimer = phaseCooldown;
-            ApplyAetherVisuals(true);
-            LabyrinthEvents.InvokeEnterAether();
-
-            yield return new WaitForSeconds(phaseDuration);
-
-            ApplyAetherVisuals(false);
-            LabyrinthEvents.InvokeExitAether();
-            isPhasing = false;
-        }
-
-        void ApplyAetherVisuals(bool enter)
-        {
-            // Simple tint/material switch to hint the state; replace with shader toggles for production
-            for (int i = 0; i < renderers.Length; i++)
-            {
-                var r = renderers[i];
-                if (enter)
-                {
-                    Material[] mats = new Material[r.sharedMaterials.Length];
-                    for (int m = 0; m < mats.Length; m++)
-                    {
-                        var mat = new Material(r.sharedMaterials[m]);
-                        if (mat.HasProperty("_Color"))
-                        {
-                            mat.color = mat.color * aetherTint;
-                        }
-                        mats[m] = mat;
-                    }
-                    r.materials = mats;
-                }
-                else
-                {
-                    r.materials = originalMaterials[i];
-                }
-            }
-        }
-
-        // Expose convenience property
-        public bool IsPhasing => isPhasing;
+        // Notify others (e.g., enemies)
+        SendMessageToPhaseListeners(true);
     }
 
-    // Interface for objects reacting to Aether enter/exit
-    public interface IAetherInteractive
+    void EndPhase()
     {
-        void OnEnterAether();
-        void OnExitAether();
+        isPhased = false;
+        if (normalMaterial != null)
+            foreach (var r in renderers)
+                r.material = normalMaterial;
+
+        foreach (var c in colliders)
+            c.isTrigger = false;
+
+        SendMessageToPhaseListeners(false);
     }
 
-    // PrismKey: a pickup that tells a HolographicProjector to change geometry
-    public class PrismKey : MonoBehaviour
+    void SendMessageToPhaseListeners(bool phased)
     {
-        public string keyId;
-        public HolographicProjector targetProjector;
-        public UnityEvent onPickedUp;
-
-        bool picked = false;
-
-        void OnTriggerEnter(Collider other)
+        // Simple broadcast; enemies or other objects can implement OnPhaseChanged(bool)
+        foreach (var listener in FindObjectsOfType<MonoBehaviour>())
         {
-            if (picked) return;
-            if (other.CompareTag("Player"))
-            {
-                picked = true;
-                onPickedUp?.Invoke();
-                if (targetProjector != null)
-                    targetProjector.ApplyPrismKey(keyId);
-                // Basic pickup feedback
-                Destroy(gameObject);
-            }
+            // Using SendMessage is slower but straightforward for prototype
+            listener.SendMessage("OnPhaseChanged", phased, SendMessageOptions.DontRequireReceiver);
         }
     }
 
-    // Holds a named geometry state
-    [Serializable]
-    public class GeometryState
+    public bool IsPhased() => isPhased;
+}
+#endregion
+
+#region LabyrinthManager and Geometry Changes
+public class LabyrinthManager : MonoBehaviour
+{
+    public static LabyrinthManager Instance { get; private set; }
+
+    [Tooltip("Assign sets of transforms that can be manipulated when projectors activate.")]
+    public List<GeometrySet> geometrySets = new List<GeometrySet>();
+
+    void Awake() => Instance = this;
+
+    // Called by Projector when a PrismKey is slotted
+    public void ApplyPrismKey(int prismId)
     {
-        public string stateId;
-        public GameObject[] enableObjects;
-        public GameObject[] disableObjects;
-        public float transitionTime = 0.5f;
+        StartCoroutine(ApplyPrismCoroutine(prismId));
     }
 
-    // Holographic projector: swaps groups of objects to reconfigure level geometry
-    public class HolographicProjector : MonoBehaviour
+    IEnumerator ApplyPrismCoroutine(int prismId)
     {
-        public List<GeometryState> states = new List<GeometryState>();
-        public UnityEvent<string> onStateApplied;
-
-        Dictionary<string, GeometryState> stateMap;
-
-        void Awake()
+        // Find matching geometry set
+        var set = geometrySets.Find(s => s.prismId == prismId);
+        if (set == null)
         {
-            stateMap = new Dictionary<string, GeometryState>();
-            foreach (var s in states)
-                if (!string.IsNullOrEmpty(s.stateId))
-                    stateMap[s.stateId] = s;
+            Debug.LogWarning($"No geometry set found for prism {prismId}");
+            yield break;
         }
 
-        public void ApplyPrismKey(string keyId)
+        // Optional pre-visualization (holographic projector)
+        if (set.projectorHologram != null)
+            set.projectorHologram.SetActive(true);
+
+        float t = 0f;
+        while (t < set.duration)
         {
-            if (stateMap.TryGetValue(keyId, out GeometryState s))
+            t += Time.deltaTime;
+            float p = set.curve.Evaluate(Mathf.Clamp01(t / set.duration));
+            for (int i = 0; i < set.targets.Length; i++)
             {
-                StopAllCoroutines();
-                StartCoroutine(ApplyStateRoutine(s));
-                onStateApplied?.Invoke(keyId);
+                var target = set.targets[i];
+                if (target == null) continue;
+                // Interpolate position and rotation towards the defined goal
+                target.localPosition = Vector3.Lerp(set.origPositions[i], set.goalPositions[i], p);
+                target.localRotation = Quaternion.Slerp(set.origRotations[i], set.goalRotations[i], p);
             }
-            else
-            {
-                Debug.LogWarning($"PrismKey '{keyId}' not found on projector '{name}'");
-            }
+            yield return null;
         }
 
-        IEnumerator ApplyStateRoutine(GeometryState state)
-        {
-            // Simple instant toggle with optional placeholder for transitions.
-            foreach (var g in state.disableObjects)
-                if (g != null) g.SetActive(false);
-            yield return new WaitForSeconds(state.transitionTime * 0.5f);
-            foreach (var g in state.enableObjects)
-                if (g != null) g.SetActive(true);
-            yield return new WaitForSeconds(state.transitionTime * 0.5f);
-        }
+        // Toggle final state (some projectors may toggle)
+        if (set.toggleAfterApply)
+            set.applied = !set.applied;
+
+        if (set.projectorHologram != null)
+            set.projectorHologram.SetActive(false);
+
+        // Notify possible echoes or gameplay systems
+        SendPostApplySignals(prismId);
     }
 
-    // EchoMemory pickup: collects fragments of the Grand Collapse memory
-    public class EchoMemory : MonoBehaviour
+    void SendPostApplySignals(int prismId)
     {
-        public string memoryId;
-        public string hintText;
-        public UnityEvent<string> onCollected;
-
-        void OnTriggerEnter(Collider other)
-        {
-            if (other.CompareTag("Player"))
-            {
-                // Could add to a player inventory; here we broadcast
-                onCollected?.Invoke(memoryId);
-                // Visual/audio feedback stub
-                Destroy(gameObject);
-            }
-        }
+        // Broadcast a simple message; systems can respond to geometry changes
+        foreach (var mb in FindObjectsOfType<MonoBehaviour>())
+            mb.SendMessage("OnPrismApplied", prismId, SendMessageOptions.DontRequireReceiver);
     }
+}
 
-    // Crystal sentinel enemy with behavior that depends on Aether state
-    public class CrystalSentinel : MonoBehaviour, IAetherInteractive
+[System.Serializable]
+public class GeometrySet
+{
+    public int prismId = 0;
+    public Transform[] targets;
+    public Vector3[] goalPositions;
+    public Quaternion[] goalRotations;
+    [HideInInspector] public Vector3[] origPositions;
+    [HideInInspector] public Quaternion[] origRotations;
+    public float duration = 1.5f;
+    public AnimationCurve curve = AnimationCurve.EaseInOut(0, 0, 1, 1);
+    public GameObject projectorHologram;
+    public bool toggleAfterApply = false;
+    [HideInInspector] public bool applied = false;
+
+    // Helper to cache original transforms (call from editor or Start)
+    public void CacheOriginals()
     {
-        public float maxHealth = 100f;
-        public float damage = 10f;
-        public bool vulnerableInAether = true;
-        public float aetherVulnerabilityMultiplier = 2f;
-        public Renderer rend;
-        public Color normalColor = Color.white;
-        public Color aetherColor = new Color(0.8f, 0.95f, 1f);
-
-        float currentHealth;
-        bool inAether = false;
-
-        void Start()
+        if (targets == null) return;
+        int n = targets.Length;
+        origPositions = new Vector3[n];
+        origRotations = new Quaternion[n];
+        for (int i = 0; i < n; i++)
         {
-            currentHealth = maxHealth;
-            if (rend == null) rend = GetComponentInChildren<Renderer>();
-            LabyrinthEvents.OnEnterAether += OnEnterAether;
-            LabyrinthEvents.OnExitAether += OnExitAether;
-            UpdateVisual();
-        }
-
-        void OnDestroy()
-        {
-            LabyrinthEvents.OnEnterAether -= OnEnterAether;
-            LabyrinthEvents.OnExitAether -= OnExitAether;
-        }
-
-        public void OnEnterAether()
-        {
-            inAether = true;
-            UpdateVisual();
-        }
-
-        public void OnExitAether()
-        {
-            inAether = false;
-            UpdateVisual();
-        }
-
-        void UpdateVisual()
-        {
-            if (rend != null && rend.material.HasProperty("_Color"))
-                rend.material.color = inAether ? aetherColor : normalColor;
-        }
-
-        public void ReceiveDamage(float amount)
-        {
-            float actual = amount;
-            if (inAether && vulnerableInAether)
-                actual *= aetherVulnerabilityMultiplier;
-
-            currentHealth -= actual;
-            if (currentHealth <= 0f) Die();
-        }
-
-        void Die()
-        {
-            // Simple death: destroy and spawn shards later
-            Destroy(gameObject);
-        }
-
-        // Example simple melee attack towards player (placeholder)
-        void OnTriggerEnter(Collider other)
-        {
-            if (other.CompareTag("Player"))
+            if (targets[i] != null)
             {
-                // Send damage to player if they have a damage receiver; placeholder
-                // other.GetComponent<PlayerHealth>()?.TakeDamage(damage);
-            }
-        }
-    }
-
-    // Labyrinth manager: tracks collected echoes and global state — a minimal game state holder
-    public class LabyrinthManager : MonoBehaviour
-    {
-        public List<string> collectedMemories = new List<string>();
-        public UnityEvent<string> onMemoryCollected;
-
-        void Awake()
-        {
-            // Hook up to EchoMemory pickups by code or let designer hook events.
-        }
-
-        public void RegisterMemory(string id)
-        {
-            if (string.IsNullOrEmpty(id)) return;
-            if (!collectedMemories.Contains(id))
-            {
-                collectedMemories.Add(id);
-                onMemoryCollected?.Invoke(id);
-                Debug.Log($"Collected EchoMemory: {id} ({collectedMemories.Count})");
+                origPositions[i] = targets[i].localPosition;
+                origRotations[i] = targets[i].localRotation;
             }
         }
     }
 }
+#endregion
+
+#region PrismKey and Projector
+public class PrismKey : MonoBehaviour
+{
+    public int prismId = 0;
+    public string displayName = "Prism Key";
+
+    // Called when inserted into a Projector (triggered by Projector)
+    public void OnInserted(Projector proj)
+    {
+        // Could play sound/animation then notify LabyrinthManager
+        LabyrinthManager.Instance.ApplyPrismKey(prismId);
+        // Destroy or disable the key
+        gameObject.SetActive(false);
+    }
+}
+
+public class Projector : MonoBehaviour
+{
+    public int requiredPrismId = 0;
+    public KeyCode interactKey = KeyCode.E;
+    public Transform insertPoint;
+
+    bool hasKeyNearby = false;
+    PrismKey nearbyKey = null;
+
+    void Update()
+    {
+        if (hasKeyNearby && nearbyKey != null && Input.GetKeyDown(interactKey))
+        {
+            InsertKey(nearbyKey);
+        }
+    }
+
+    void InsertKey(PrismKey key)
+    {
+        if (key.prismId != requiredPrismId)
+        {
+            // Could flash denial effect
+            Debug.Log("Wrong Prism");
+            return;
+        }
+
+        // Snap key to projector
+        if (insertPoint != null)
+        {
+            key.transform.position = insertPoint.position;
+            key.transform.rotation = insertPoint.rotation;
+            key.transform.SetParent(insertPoint);
+        }
+
+        key.OnInserted(this);
+        // Optionally change projector visuals
+        SendMessage("OnKeyInserted", key.prismId, SendMessageOptions.DontRequireReceiver);
+    }
+
+    void OnTriggerEnter(Collider other)
+    {
+        var key = other.GetComponent<PrismKey>();
+        if (key != null)
+        {
+            hasKeyNearby = true;
+            nearbyKey = key;
+        }
+    }
+
+    void OnTriggerExit(Collider other)
+    {
+        var key = other.GetComponent<PrismKey>();
+        if (key != null && nearbyKey == key)
+        {
+            hasKeyNearby = false;
+            nearbyKey = null;
+        }
+    }
+}
+#endregion
+
+#region Sentinels (enemies) and puzzle echoes
+public class Sentinel : MonoBehaviour
+{
+    public int maxHealth = 3;
+    int health;
+    public bool vulnerableOnlyWhenPhased = true;
+    public ParticleSystem shatterEffect;
+
+    void Start() => health = maxHealth;
+
+    public void ReceiveAttack(int damage)
+    {
+        bool shardPhased = ShardController.Instance != null && ShardController.Instance.IsPhased();
+        if (vulnerableOnlyWhenPhased && !shardPhased)
+        {
+            // Attack has no effect or is reflected
+            FlashShield();
+            return;
+        }
+
+        health -= damage;
+        if (health <= 0) Die();
+    }
+
+    void FlashShield()
+    {
+        // Simple visual feedback
+        // (implement shader flash or particle in editor)
+    }
+
+    void Die()
+    {
+        if (shatterEffect != null) Instantiate(shatterEffect, transform.position, Quaternion.identity);
+        Destroy(gameObject);
+    }
+
+    // Optional listener for phase changes
+    void OnPhaseChanged(bool phased)
+    {
+        // Example: change tint or behavior
+        var r = GetComponent<Renderer>();
+        if (r != null)
+            r.material.SetFloat("_Emission", phased ? 1f : 0.2f);
+    }
+}
+#endregion
+
+#region EchoMemory (collectible fragments)
+public class EchoMemory : MonoBehaviour
+{
+    public string fragmentText = "Fragment of memory...";
+    bool collected = false;
+
+    void OnTriggerEnter(Collider other)
+    {
+        if (collected) return;
+        if (other.GetComponent<ShardController>())
+        {
+            Collect();
+        }
+    }
+
+    void Collect()
+    {
+        collected = true;
+        // Could push to a UI manager or story log
+        Debug.Log("Collected Echo: " + fragmentText);
+        gameObject.SetActive(false);
+    }
+}
+#endregion
