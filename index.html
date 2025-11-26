@@ -1,180 +1,262 @@
 <!doctype html>
-<html lang="en">
+<!-- Simple mining game: click blocks to break them.
+    Materials: Stone, Iron, Diamond, Tungsten
+    Starter pickaxe: Wood (can mine Stone)
+    Every 2 mined blocks of a material unlock that material's pickaxe.
+    Higher-tier pickaxes mine lower-tier blocks faster.
+-->
+<html>
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Neon Terminal Mock</title>
+<title>Mining Game</title>
 <style>
-    :root{
-        --bg:#000000;
-        --neon:#00ff00;
-        --danger:#ff0000;
-        --mono: "Consolas","Monaco","Courier New",monospace;
-    }
-    html,body{height:100%;margin:0;background:var(--bg);color:var(--neon);font-family:var(--mono);-webkit-font-smoothing:antialiased;}
-    .wrap{max-width:1100px;margin:18px auto;padding:14px;border:1px solid var(--neon);box-sizing:border-box;}
-    .header{display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
-    .hex-block{border:1px solid var(--neon);padding:8px 10px;font-size:13px;background:transparent;box-shadow:0 0 8px rgba(0,255,0,0.03) inset;}
-    .status-small{border:1px solid var(--neon);padding:8px 10px;font-size:13px;}
-    .warning{
-        width:100%;
-        text-align:center;
-        color:var(--danger);
-        font-weight:800;
-        font-size:28px;
-        border:1px solid rgba(255,0,0,0.15);
-        padding:10px;
-        box-sizing:border-box;
-        text-transform:uppercase;
-        letter-spacing:1px;
-        text-shadow:0 0 12px rgba(255,0,0,0.6);
-        animation:flash 1s steps(2) infinite;
-    }
-    @keyframes flash{0%,45%{opacity:1}50%,100%{opacity:0.12}}
-    .terminal{
-        margin-top:12px;
-        height:420px;
-        overflow:auto;
-        padding:12px;
-        border:1px solid var(--neon);
-        box-sizing:border-box;
-        background:transparent;
-        white-space:pre-wrap;
-        font-size:13px;
-        line-height:1.25;
-    }
-    .meter-wrap{margin-top:12px;border:1px solid var(--neon);padding:8px;display:flex;align-items:center;gap:12px;}
-    .progress{flex:1;height:14px;border:1px solid var(--neon);position:relative;background:transparent;overflow:hidden;}
-    .progress-inner{height:100%;background:linear-gradient(90deg,rgba(0,255,0,0.06),rgba(0,255,0,0.55));width:0%;}
-    .meter-label{min-width:200px;font-size:13px;}
-    .prompt-bottom{
-        position:fixed;left:20px;right:20px;bottom:20px;padding:10px;border-top:1px solid var(--neon);display:flex;align-items:center;gap:8px;background:transparent;box-sizing:border-box;
-    }
-    .await{font-size:14px;}
-    .cursor{
-        width:10px;height:18px;background:var(--neon);display:inline-block;margin-left:6px;animation:blink 1s steps(2) infinite;
-    }
-    @keyframes blink{50%{opacity:0}}
-    /* small utility */
-    .muted{opacity:0.6;font-size:12px}
+  html,body{height:100%;margin:0;font-family:Arial;background:#222;color:#ddd}
+  #ui{display:flex;gap:12px;padding:12px;align-items:center}
+  canvas{background:#111;display:block;margin:0 auto;box-shadow:0 0 10px #000}
+  .panel{background:#1a1a1a;padding:8px;border-radius:6px}
+  button{padding:6px 10px;border-radius:4px;border:none;background:#2a6;cursor:pointer}
+  .small{font-size:13px;color:#bbb}
 </style>
 </head>
 <body>
-    <div class="wrap" id="app">
-        <div class="header">
-            <div class="hex-block">Hexadecimal data blocks: 0x7B 0x56 0xAB 0x1F 0x0D</div>
-            <div class="status-small muted">[+] Buffer Overflow Attempt... <strong>SUCCESS</strong></div>
-        </div>
+<div id="ui">
+  <div class="panel">
+    <div><strong>Pickaxe:</strong> <span id="pickName">Wood</span></div>
+    <div class="small">Damage multiplier: <span id="pickMult">1.0</span></div>
+  </div>
+  <div class="panel">
+    <div><strong>Inventory (mined)</strong></div>
+    <div class="small">Stone: <span id="cntStone">0</span></div>
+    <div class="small">Iron: <span id="cntIron">0</span></div>
+    <div class="small">Diamond: <span id="cntDiamond">0</span></div>
+    <div class="small">Tungsten: <span id="cntTungsten">0</span></div>
+  </div>
+  <div class="panel">
+    <div><strong>Unlocked Picks</strong></div>
+    <div class="small" id="unlocked">Wood</div>
+  </div>
+  <div class="panel">
+    <div><strong>Tips</strong></div>
+    <div class="small">Click blocks to deal damage (base 20%).</div>
+    <div class="small">Mine 2 of a material to unlock its pickaxe.</div>
+  </div>
+  <div style="flex:1"></div>
+  <button id="regen">Regenerate Map</button>
+</div>
 
-        <div class="warning" id="bigWarning">ACCESS DENIED - INTERVENTION REQUIRED</div>
-
-        <div class="terminal" id="terminal" aria-live="polite"></div>
-
-        <div class="meter-wrap">
-            <div class="meter-label" id="meterLabel">Data Extraction Complete</div>
-            <div class="progress" id="progress"><div class="progress-inner" id="progressInner"></div></div>
-            <div class="muted" id="pct">0%</div>
-        </div>
-    </div>
-
-    <div class="prompt-bottom" aria-hidden="false">
-        <div class="await">AWAITING USER INPUT &gt;</div>
-        <div class="cursor" aria-hidden="true"></div>
-    </div>
+<canvas id="c" width="800" height="480"></canvas>
 
 <script>
-/* Simple neon terminal simulation:
-     - Appends a new random line every 100ms
-     - Progress bar moves quickly 0→100% then resets, toggles messages on completion
-     - Keeps terminal to recent maxLines for performance
-*/
+/* Config */
+const COLS = 16, ROWS = 10;
+const TILE = 40;
+const BASE_DAMAGE_PERCENT = 20; // default per click
+const UNLOCK_REQ = 2; // blocks needed to unlock a pickaxe
 
-(function(){
-    const terminal = document.getElementById('terminal');
-    const progressInner = document.getElementById('progressInner');
-    const pct = document.getElementById('pct');
-    const meterLabel = document.getElementById('meterLabel');
+/* Material definitions (higher tier = rarer & harder to mine by low-tier picks) */
+const MATERIALS = [
+  // id, name, color, tier (1=common -> 4=rarest)
+  {id: 'stone', name:'Stone', color:'#6d6d6d', tier:1, prob:0.72},
+  {id: 'iron', name:'Iron', color:'#c38b3a', tier:2, prob:0.18},
+  {id: 'diamond', name:'Diamond', color:'#39d0ff', tier:3, prob:0.08},
+  {id: 'tungsten', name:'Tungsten', color:'#3b3f46', tier:4, prob:0.02}
+];
 
-    const lines = [];
-    const maxLines = 1000;
+/* Pickaxe definitions: tier determines which materials it can damage (tier >= material.tier).
+   Multipliers increase with higher-tier picks so they break lower materials faster. */
+const PICKAXES = {
+  wood: {name:'Wood', tier:1, mult:1.0},
+  stone: {name:'Stone', tier:1, mult:1.2},
+  iron: {name:'Iron', tier:2, mult:1.6},
+  diamond: {name:'Diamond', tier:3, mult:2.4},
+  tungsten: {name:'Tungsten', tier:4, mult:3.0}
+};
 
-    const snippets = [
-        "C:\\> system32 /access /admin",
-        "C:\\Windows\\System32\\drivers\\net.sys loaded",
-        "[+] Buffer Overflow Attempt... SUCCESS",
-        "auth: token validated (0xA1B2C3D4)",
-        "established socket 192.168.0.12:443 -> 10.0.0.5:50432",
-        "read: 0x7B 0x56 0xAB 0x1F 0x0D",
-        "memdump chunk: 0x00 0xFF 0x12 0x34",
-        "protocol: SSHv2 handshake complete",
-        "warning: unusual activity on port 22",
-        "log: user root attempted sudo -s",
-        "service: database_query executor spawned",
-        "payload checksum: 0x9F3C71",
-        "C:\\> netstat -an | find \"ESTABLISHED\"",
-        "record: 0xDEADBEEF"
-    ];
+/* Game state */
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let grid = [];
+let picked = 'wood';
+let unlocked = new Set(['wood']);
+let minedCounts = {stone:0, iron:0, diamond:0, tungsten:0};
 
-    function pushLine(text){
-        const now = new Date().toLocaleTimeString();
-        lines.push(now + "  " + text);
-        if(lines.length > maxLines) lines.splice(0, lines.length - maxLines);
-        terminal.textContent = lines.join("\n");
-        terminal.scrollTop = terminal.scrollHeight;
+/* UI refs */
+const pickNameEl = document.getElementById('pickName');
+const pickMultEl = document.getElementById('pickMult');
+const cntStoneEl = document.getElementById('cntStone');
+const cntIronEl = document.getElementById('cntIron');
+const cntDiamondEl = document.getElementById('cntDiamond');
+const cntTungstenEl = document.getElementById('cntTungsten');
+const unlockedEl = document.getElementById('unlocked');
+const regenBtn = document.getElementById('regen');
+
+/* Helpers */
+function randMaterialByProb() {
+  const r = Math.random();
+  let acc = 0;
+  for (const m of MATERIALS) {
+    acc += m.prob;
+    if (r < acc) return m;
+  }
+  return MATERIALS[0];
+}
+
+function makeGrid() {
+  grid = [];
+  for (let y=0;y<ROWS;y++){
+    const row=[];
+    for (let x=0;x<COLS;x++){
+     const mat = randMaterialByProb();
+     row.push({matId:mat.id, hp:100});
     }
+    grid.push(row);
+  }
+}
+makeGrid();
 
-    // append random line every 100ms
-    setInterval(()=>{
-        const r = Math.random();
-        if(r < 0.02){
-            pushLine("ALERT: intrusion detection triggered");
-        } else if (r < 0.06){
-            pushLine(snippets[Math.floor(Math.random()*snippets.length)].toUpperCase());
-        } else {
-            // generate pseudo-random hex / numeric noise lines
-            const hex = Array.from({length:6},()=>('0x'+Math.floor(Math.random()*256).toString(16).padStart(2,'0'))).join(' ');
-            const noise = Math.random() < 0.5 ? hex : ("CMD: exec_" + Math.random().toString(36).slice(2,8));
-            pushLine(noise);
-        }
-    }, 100);
+/* Drawing */
+function draw() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  // draw grid
+  for (let y=0;y<ROWS;y++){
+    for (let x=0;x<COLS;x++){
+     const t = grid[y][x];
+     const m = MATERIALS.find(mm=>mm.id===t.matId);
+     const px = x*TILE + 20;
+     const py = y*TILE + 60;
+     // tile background
+     ctx.fillStyle = '#222';
+     ctx.fillRect(px,py,TILE-2,TILE-2);
+     // ore block
+     ctx.fillStyle = m.color;
+     ctx.fillRect(px+2,py+2,TILE-6,TILE-6);
+     // overlay dim if partially broken
+     const broken = 1 - (t.hp/100);
+     if (broken>0){
+       ctx.fillStyle = 'rgba(0,0,0,' + Math.min(0.9, broken)+')';
+       ctx.fillRect(px+2,py+2,TILE-6,TILE-6);
+     }
+     // HP bar
+     ctx.fillStyle = '#000';
+     ctx.fillRect(px+2,py+TILE-8,TILE-6,5);
+     ctx.fillStyle = '#0f0';
+     ctx.fillRect(px+2,py+TILE-8,(TILE-6)*(t.hp/100),5);
+     // name small
+     ctx.fillStyle = '#fff';
+     ctx.font = '10px Arial';
+     ctx.fillText(m.name, px+4, py+12);
+    }
+  }
 
-    // progress bar loop: fast fill then reset; on complete toggle messages occasionally
-    let pctVal = 0;
-    const speed = 6; // increment per tick
-    setInterval(()=>{
-        pctVal += speed;
-        if(pctVal >= 100){
-            pctVal = 100;
-            progressInner.style.width = pctVal + "%";
-            pct.textContent = pctVal + "%";
-            // snapshot event: push completion line then immediately reset
-            const completedMsg = Math.random() < 0.5 ? "Data Extraction Complete" : "Root Access Gained";
-            pushLine("[*] " + completedMsg);
-            // quick flash label swap
-            meterLabel.textContent = completedMsg;
-            // brief visible pause then reset
-            setTimeout(()=>{
-                pctVal = 0;
-                progressInner.style.width = "0%";
-                pct.textContent = "0%";
-                meterLabel.textContent = "Data Extraction Complete";
-            }, 220);
-        } else {
-            progressInner.style.width = pctVal + "%";
-            pct.textContent = pctVal + "%";
-        }
-    }, 40);
+  // draw player as green blob
+  ctx.beginPath();
+  ctx.fillStyle = '#2ecc71';
+  ctx.arc(60,30,18,0,Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle='#033'; ctx.fillRect(46,30,28,6); // little "mouth"
+  // HUD updates
+  pickNameEl.textContent = PICKAXES[picked].name;
+  pickMultEl.textContent = PICKAXES[picked].mult.toFixed(2);
+  cntStoneEl.textContent = minedCounts.stone;
+  cntIronEl.textContent = minedCounts.iron;
+  cntDiamondEl.textContent = minedCounts.diamond;
+  cntTungstenEl.textContent = minedCounts.tungsten;
+  unlockedEl.textContent = Array.from(unlocked).map(k=>PICKAXES[k].name).join(', ');
+}
 
-    // seed some initial lines
-    [
-        "SYSTEM BOOT: kernel v5.12.0",
-        "C:\\> system32 /scan /quick",
-        "[+] Initializing extraction modules",
-        "network: interface eth0 up",
-        "launching probe sequence..."
-    ].forEach(pushLine);
+canvas.addEventListener('click', (ev)=>{
+  const rect = canvas.getBoundingClientRect();
+  const mx = ev.clientX - rect.left;
+  const my = ev.clientY - rect.top;
+  // find clicked tile
+  for (let y=0;y<ROWS;y++){
+    for (let x=0;x<COLS;x++){
+     const px = x*TILE + 20;
+     const py = y*TILE + 60;
+     if (mx >= px && mx <= px+TILE-2 && my >= py && my <= py+TILE-2){
+       handleClickTile(x,y);
+       return;
+     }
+    }
+  }
+});
 
-})();
+function handleClickTile(x,y){
+  const tile = grid[y][x];
+  const mat = MATERIALS.find(m=>m.id===tile.matId);
+  const pick = PICKAXES[picked];
+
+  // can we damage? Only if pick.tier >= material.tier
+  if (pick.tier < mat.tier){
+    // show a small shake / flash
+    flashTile(x,y,'#ff4d4d');
+    return;
+  }
+
+  // compute damage percent
+  const tierDiff = pick.tier - mat.tier;
+  // higher pick tiers break easier materials faster
+  const bonus = 0.3 * tierDiff; // 30% per tier above
+  const dmgPercent = BASE_DAMAGE_PERCENT * (1 + bonus) * pick.mult;
+  tile.hp -= dmgPercent;
+  if (tile.hp <= 0){
+    // mined
+    onMine(tile.matId);
+    // replace tile with new random material (rare ores remain rarer)
+    const newMat = randMaterialByProb();
+    grid[y][x] = {matId:newMat.id, hp:100};
+  }
+  draw();
+}
+
+function flashTile(x,y,color){
+  const px = x*TILE + 20;
+  const py = y*TILE + 60;
+  const prev = ctx.getImageData(px,py,TILE-2,TILE-2);
+  ctx.fillStyle = color;
+  ctx.fillRect(px,py,TILE-2,TILE-2);
+  setTimeout(()=>{ ctx.putImageData(prev,px,py); draw(); }, 120);
+}
+
+function onMine(matId){
+  if (!minedCounts.hasOwnProperty(matId)) return;
+  minedCounts[matId] += 1;
+  // unlock pickaxe when reaching UNLOCK_REQ
+  if (minedCounts[matId] >= UNLOCK_REQ){
+    // map matId to pick name
+    const mapping = {stone:'stone', iron:'iron', diamond:'diamond', tungsten:'tungsten'};
+    const pickKey = mapping[matId];
+    if (pickKey && !unlocked.has(pickKey)){
+     unlocked.add(pickKey);
+     // auto-equip new pick
+     picked = pickKey;
+    }
+  }
+}
+
+/* Simple keyboard support to switch picks among unlocked */
+window.addEventListener('keydown', (e)=>{
+  if (e.key === '1') pickIfUnlocked('wood');
+  if (e.key === '2') pickIfUnlocked('stone');
+  if (e.key === '3') pickIfUnlocked('iron');
+  if (e.key === '4') pickIfUnlocked('diamond');
+  if (e.key === '5') pickIfUnlocked('tungsten');
+  draw();
+});
+function pickIfUnlocked(k){
+  if (unlocked.has(k)) picked = k;
+}
+
+/* regen button */
+regenBtn.addEventListener('click', ()=>{
+  makeGrid();
+  // reset inventory but keep unlocked picks (so progression continues)
+  minedCounts = {stone:0, iron:0, diamond:0, tungsten:0};
+  draw();
+});
+
+/* initial draw */
+draw();
 </script>
 </body>
 </html>
