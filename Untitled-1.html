@@ -1,0 +1,310 @@
+// AetherDriftCore.cs
+// Single-file starter systems for "Aether Drift: Echoes of the Glass Labyrinth"
+// Attachables for Unity (3D). Lightweight, extensible foundation for Phase-Shift, PrismKeys,
+// HolographicProjectors (level geometry), EchoMemory pickups, and a CrystalSentinel enemy.
+
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.Events;
+
+namespace AetherDrift
+{
+    // Global events for Aether state changes
+    public static class LabyrinthEvents
+    {
+        public static event Action OnEnterAether;
+        public static event Action OnExitAether;
+
+        public static void InvokeEnterAether() => OnEnterAether?.Invoke();
+        public static void InvokeExitAether() => OnExitAether?.Invoke();
+    }
+
+    // Player/Shard controller: handles movement stub and Phase-Shift ability
+    public class ShardController : MonoBehaviour
+    {
+        [Header("Phase-Shift")]
+        public float phaseDuration = 2f;
+        public float phaseCooldown = 3f;
+        public Color aetherTint = new Color(0.6f, 0.8f, 1f, 0.5f);
+
+        bool isPhasing = false;
+        bool canPhase = true;
+        float cooldownTimer = 0f;
+
+        Renderer[] renderers;
+        List<Material[]> originalMaterials = new List<Material[]>();
+
+        void Start()
+        {
+            renderers = GetComponentsInChildren<Renderer>();
+            foreach (var r in renderers)
+            {
+                originalMaterials.Add(r.sharedMaterials);
+            }
+        }
+
+        void Update()
+        {
+            // Replace with input system binding as needed.
+            if (Input.GetKeyDown(KeyCode.E) && canPhase)
+            {
+                StartCoroutine(PhaseRoutine());
+            }
+
+            if (!canPhase)
+            {
+                cooldownTimer -= Time.deltaTime;
+                if (cooldownTimer <= 0f)
+                {
+                    canPhase = true;
+                }
+            }
+        }
+
+        IEnumerator PhaseRoutine()
+        {
+            isPhasing = true;
+            canPhase = false;
+            cooldownTimer = phaseCooldown;
+            ApplyAetherVisuals(true);
+            LabyrinthEvents.InvokeEnterAether();
+
+            yield return new WaitForSeconds(phaseDuration);
+
+            ApplyAetherVisuals(false);
+            LabyrinthEvents.InvokeExitAether();
+            isPhasing = false;
+        }
+
+        void ApplyAetherVisuals(bool enter)
+        {
+            // Simple tint/material switch to hint the state; replace with shader toggles for production
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                var r = renderers[i];
+                if (enter)
+                {
+                    Material[] mats = new Material[r.sharedMaterials.Length];
+                    for (int m = 0; m < mats.Length; m++)
+                    {
+                        var mat = new Material(r.sharedMaterials[m]);
+                        if (mat.HasProperty("_Color"))
+                        {
+                            mat.color = mat.color * aetherTint;
+                        }
+                        mats[m] = mat;
+                    }
+                    r.materials = mats;
+                }
+                else
+                {
+                    r.materials = originalMaterials[i];
+                }
+            }
+        }
+
+        // Expose convenience property
+        public bool IsPhasing => isPhasing;
+    }
+
+    // Interface for objects reacting to Aether enter/exit
+    public interface IAetherInteractive
+    {
+        void OnEnterAether();
+        void OnExitAether();
+    }
+
+    // PrismKey: a pickup that tells a HolographicProjector to change geometry
+    public class PrismKey : MonoBehaviour
+    {
+        public string keyId;
+        public HolographicProjector targetProjector;
+        public UnityEvent onPickedUp;
+
+        bool picked = false;
+
+        void OnTriggerEnter(Collider other)
+        {
+            if (picked) return;
+            if (other.CompareTag("Player"))
+            {
+                picked = true;
+                onPickedUp?.Invoke();
+                if (targetProjector != null)
+                    targetProjector.ApplyPrismKey(keyId);
+                // Basic pickup feedback
+                Destroy(gameObject);
+            }
+        }
+    }
+
+    // Holds a named geometry state
+    [Serializable]
+    public class GeometryState
+    {
+        public string stateId;
+        public GameObject[] enableObjects;
+        public GameObject[] disableObjects;
+        public float transitionTime = 0.5f;
+    }
+
+    // Holographic projector: swaps groups of objects to reconfigure level geometry
+    public class HolographicProjector : MonoBehaviour
+    {
+        public List<GeometryState> states = new List<GeometryState>();
+        public UnityEvent<string> onStateApplied;
+
+        Dictionary<string, GeometryState> stateMap;
+
+        void Awake()
+        {
+            stateMap = new Dictionary<string, GeometryState>();
+            foreach (var s in states)
+                if (!string.IsNullOrEmpty(s.stateId))
+                    stateMap[s.stateId] = s;
+        }
+
+        public void ApplyPrismKey(string keyId)
+        {
+            if (stateMap.TryGetValue(keyId, out GeometryState s))
+            {
+                StopAllCoroutines();
+                StartCoroutine(ApplyStateRoutine(s));
+                onStateApplied?.Invoke(keyId);
+            }
+            else
+            {
+                Debug.LogWarning($"PrismKey '{keyId}' not found on projector '{name}'");
+            }
+        }
+
+        IEnumerator ApplyStateRoutine(GeometryState state)
+        {
+            // Simple instant toggle with optional placeholder for transitions.
+            foreach (var g in state.disableObjects)
+                if (g != null) g.SetActive(false);
+            yield return new WaitForSeconds(state.transitionTime * 0.5f);
+            foreach (var g in state.enableObjects)
+                if (g != null) g.SetActive(true);
+            yield return new WaitForSeconds(state.transitionTime * 0.5f);
+        }
+    }
+
+    // EchoMemory pickup: collects fragments of the Grand Collapse memory
+    public class EchoMemory : MonoBehaviour
+    {
+        public string memoryId;
+        public string hintText;
+        public UnityEvent<string> onCollected;
+
+        void OnTriggerEnter(Collider other)
+        {
+            if (other.CompareTag("Player"))
+            {
+                // Could add to a player inventory; here we broadcast
+                onCollected?.Invoke(memoryId);
+                // Visual/audio feedback stub
+                Destroy(gameObject);
+            }
+        }
+    }
+
+    // Crystal sentinel enemy with behavior that depends on Aether state
+    public class CrystalSentinel : MonoBehaviour, IAetherInteractive
+    {
+        public float maxHealth = 100f;
+        public float damage = 10f;
+        public bool vulnerableInAether = true;
+        public float aetherVulnerabilityMultiplier = 2f;
+        public Renderer rend;
+        public Color normalColor = Color.white;
+        public Color aetherColor = new Color(0.8f, 0.95f, 1f);
+
+        float currentHealth;
+        bool inAether = false;
+
+        void Start()
+        {
+            currentHealth = maxHealth;
+            if (rend == null) rend = GetComponentInChildren<Renderer>();
+            LabyrinthEvents.OnEnterAether += OnEnterAether;
+            LabyrinthEvents.OnExitAether += OnExitAether;
+            UpdateVisual();
+        }
+
+        void OnDestroy()
+        {
+            LabyrinthEvents.OnEnterAether -= OnEnterAether;
+            LabyrinthEvents.OnExitAether -= OnExitAether;
+        }
+
+        public void OnEnterAether()
+        {
+            inAether = true;
+            UpdateVisual();
+        }
+
+        public void OnExitAether()
+        {
+            inAether = false;
+            UpdateVisual();
+        }
+
+        void UpdateVisual()
+        {
+            if (rend != null && rend.material.HasProperty("_Color"))
+                rend.material.color = inAether ? aetherColor : normalColor;
+        }
+
+        public void ReceiveDamage(float amount)
+        {
+            float actual = amount;
+            if (inAether && vulnerableInAether)
+                actual *= aetherVulnerabilityMultiplier;
+
+            currentHealth -= actual;
+            if (currentHealth <= 0f) Die();
+        }
+
+        void Die()
+        {
+            // Simple death: destroy and spawn shards later
+            Destroy(gameObject);
+        }
+
+        // Example simple melee attack towards player (placeholder)
+        void OnTriggerEnter(Collider other)
+        {
+            if (other.CompareTag("Player"))
+            {
+                // Send damage to player if they have a damage receiver; placeholder
+                // other.GetComponent<PlayerHealth>()?.TakeDamage(damage);
+            }
+        }
+    }
+
+    // Labyrinth manager: tracks collected echoes and global state — a minimal game state holder
+    public class LabyrinthManager : MonoBehaviour
+    {
+        public List<string> collectedMemories = new List<string>();
+        public UnityEvent<string> onMemoryCollected;
+
+        void Awake()
+        {
+            // Hook up to EchoMemory pickups by code or let designer hook events.
+        }
+
+        public void RegisterMemory(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return;
+            if (!collectedMemories.Contains(id))
+            {
+                collectedMemories.Add(id);
+                onMemoryCollected?.Invoke(id);
+                Debug.Log($"Collected EchoMemory: {id} ({collectedMemories.Count})");
+            }
+        }
+    }
+}
