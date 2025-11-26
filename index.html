@@ -1,86 +1,180 @@
 <!doctype html>
 <html lang="en">
 <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>WARNING Flashing Sign</title>
-    <style>
-        :root{
-            --size: clamp(1.8rem, 6vw, 4rem);
-            --pad: 1.2rem;
-            --radius: 10px;
-        }
-        html,body{height:100%}
-        body{
-            margin:0;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            background:#111;
-            color:#fff;
-            font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;
-            -webkit-font-smoothing:antialiased;
-            -moz-osx-font-smoothing:grayscale;
-            padding:2rem;
-        }
-
-        .container{
-            text-align:center;
-            max-width:90ch;
-        }
-
-        .warning{
-            display:inline-block;
-            padding:var(--pad) 2.4rem;
-            border-radius:var(--radius);
-            font-weight:900;
-            font-size:var(--size);
-            letter-spacing:0.06em;
-            text-transform:uppercase;
-            box-shadow:0 8px 24px rgba(0,0,0,0.6), inset 0 -6px 18px rgba(0,0,0,0.25);
-            user-select:none;
-            /* flashing between red bg / black text and black bg / red text */
-            animation:flash 700ms steps(1,end) infinite;
-        }
-
-        @keyframes flash{
-            0%   { background:#e20f0f; color:#0b0b0b; }
-            50%  { background:#0b0b0b; color:#e20f0f; }
-            100% { background:#e20f0f; color:#0b0b0b; }
-        }
-
-        .sub{
-            margin-top:1.2rem;
-            font-size:1.05rem;
-            color:#ddd;
-            opacity:0.95;
-        }
-
-        .sub.kidding{
-            margin-top:0.8rem;
-            font-size:1rem;
-            color:#cfcfcf;
-            font-weight:600;
-        }
-
-        .sub.but{
-            margin-top:0.25rem;
-            font-size:1rem;
-            color:#ff5a5a;
-            font-weight:700;
-        }
-
-        /* Respect users who prefer reduced motion */
-        @media (prefers-reduced-motion: reduce){
-            .warning{ animation: none; background:#e20f0f; color:#0b0b0b; }
-        }
-    </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Neon Terminal Mock</title>
+<style>
+    :root{
+        --bg:#000000;
+        --neon:#00ff00;
+        --danger:#ff0000;
+        --mono: "Consolas","Monaco","Courier New",monospace;
+    }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--neon);font-family:var(--mono);-webkit-font-smoothing:antialiased;}
+    .wrap{max-width:1100px;margin:18px auto;padding:14px;border:1px solid var(--neon);box-sizing:border-box;}
+    .header{display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
+    .hex-block{border:1px solid var(--neon);padding:8px 10px;font-size:13px;background:transparent;box-shadow:0 0 8px rgba(0,255,0,0.03) inset;}
+    .status-small{border:1px solid var(--neon);padding:8px 10px;font-size:13px;}
+    .warning{
+        width:100%;
+        text-align:center;
+        color:var(--danger);
+        font-weight:800;
+        font-size:28px;
+        border:1px solid rgba(255,0,0,0.15);
+        padding:10px;
+        box-sizing:border-box;
+        text-transform:uppercase;
+        letter-spacing:1px;
+        text-shadow:0 0 12px rgba(255,0,0,0.6);
+        animation:flash 1s steps(2) infinite;
+    }
+    @keyframes flash{0%,45%{opacity:1}50%,100%{opacity:0.12}}
+    .terminal{
+        margin-top:12px;
+        height:420px;
+        overflow:auto;
+        padding:12px;
+        border:1px solid var(--neon);
+        box-sizing:border-box;
+        background:transparent;
+        white-space:pre-wrap;
+        font-size:13px;
+        line-height:1.25;
+    }
+    .meter-wrap{margin-top:12px;border:1px solid var(--neon);padding:8px;display:flex;align-items:center;gap:12px;}
+    .progress{flex:1;height:14px;border:1px solid var(--neon);position:relative;background:transparent;overflow:hidden;}
+    .progress-inner{height:100%;background:linear-gradient(90deg,rgba(0,255,0,0.06),rgba(0,255,0,0.55));width:0%;}
+    .meter-label{min-width:200px;font-size:13px;}
+    .prompt-bottom{
+        position:fixed;left:20px;right:20px;bottom:20px;padding:10px;border-top:1px solid var(--neon);display:flex;align-items:center;gap:8px;background:transparent;box-sizing:border-box;
+    }
+    .await{font-size:14px;}
+    .cursor{
+        width:10px;height:18px;background:var(--neon);display:inline-block;margin-left:6px;animation:blink 1s steps(2) infinite;
+    }
+    @keyframes blink{50%{opacity:0}}
+    /* small utility */
+    .muted{opacity:0.6;font-size:12px}
+</style>
 </head>
 <body>
-    <div class="container" role="group" aria-label="Warning sign and message">
-        <div class="warning" aria-hidden="false">WARNING</div>
-        <div class="sub kidding">just kidding, you have not been hacked</div>
-        <div class="sub but">but you have been.</div>
+    <div class="wrap" id="app">
+        <div class="header">
+            <div class="hex-block">Hexadecimal data blocks: 0x7B 0x56 0xAB 0x1F 0x0D</div>
+            <div class="status-small muted">[+] Buffer Overflow Attempt... <strong>SUCCESS</strong></div>
+        </div>
+
+        <div class="warning" id="bigWarning">ACCESS DENIED - INTERVENTION REQUIRED</div>
+
+        <div class="terminal" id="terminal" aria-live="polite"></div>
+
+        <div class="meter-wrap">
+            <div class="meter-label" id="meterLabel">Data Extraction Complete</div>
+            <div class="progress" id="progress"><div class="progress-inner" id="progressInner"></div></div>
+            <div class="muted" id="pct">0%</div>
+        </div>
     </div>
+
+    <div class="prompt-bottom" aria-hidden="false">
+        <div class="await">AWAITING USER INPUT &gt;</div>
+        <div class="cursor" aria-hidden="true"></div>
+    </div>
+
+<script>
+/* Simple neon terminal simulation:
+     - Appends a new random line every 100ms
+     - Progress bar moves quickly 0→100% then resets, toggles messages on completion
+     - Keeps terminal to recent maxLines for performance
+*/
+
+(function(){
+    const terminal = document.getElementById('terminal');
+    const progressInner = document.getElementById('progressInner');
+    const pct = document.getElementById('pct');
+    const meterLabel = document.getElementById('meterLabel');
+
+    const lines = [];
+    const maxLines = 1000;
+
+    const snippets = [
+        "C:\\> system32 /access /admin",
+        "C:\\Windows\\System32\\drivers\\net.sys loaded",
+        "[+] Buffer Overflow Attempt... SUCCESS",
+        "auth: token validated (0xA1B2C3D4)",
+        "established socket 192.168.0.12:443 -> 10.0.0.5:50432",
+        "read: 0x7B 0x56 0xAB 0x1F 0x0D",
+        "memdump chunk: 0x00 0xFF 0x12 0x34",
+        "protocol: SSHv2 handshake complete",
+        "warning: unusual activity on port 22",
+        "log: user root attempted sudo -s",
+        "service: database_query executor spawned",
+        "payload checksum: 0x9F3C71",
+        "C:\\> netstat -an | find \"ESTABLISHED\"",
+        "record: 0xDEADBEEF"
+    ];
+
+    function pushLine(text){
+        const now = new Date().toLocaleTimeString();
+        lines.push(now + "  " + text);
+        if(lines.length > maxLines) lines.splice(0, lines.length - maxLines);
+        terminal.textContent = lines.join("\n");
+        terminal.scrollTop = terminal.scrollHeight;
+    }
+
+    // append random line every 100ms
+    setInterval(()=>{
+        const r = Math.random();
+        if(r < 0.02){
+            pushLine("ALERT: intrusion detection triggered");
+        } else if (r < 0.06){
+            pushLine(snippets[Math.floor(Math.random()*snippets.length)].toUpperCase());
+        } else {
+            // generate pseudo-random hex / numeric noise lines
+            const hex = Array.from({length:6},()=>('0x'+Math.floor(Math.random()*256).toString(16).padStart(2,'0'))).join(' ');
+            const noise = Math.random() < 0.5 ? hex : ("CMD: exec_" + Math.random().toString(36).slice(2,8));
+            pushLine(noise);
+        }
+    }, 100);
+
+    // progress bar loop: fast fill then reset; on complete toggle messages occasionally
+    let pctVal = 0;
+    const speed = 6; // increment per tick
+    setInterval(()=>{
+        pctVal += speed;
+        if(pctVal >= 100){
+            pctVal = 100;
+            progressInner.style.width = pctVal + "%";
+            pct.textContent = pctVal + "%";
+            // snapshot event: push completion line then immediately reset
+            const completedMsg = Math.random() < 0.5 ? "Data Extraction Complete" : "Root Access Gained";
+            pushLine("[*] " + completedMsg);
+            // quick flash label swap
+            meterLabel.textContent = completedMsg;
+            // brief visible pause then reset
+            setTimeout(()=>{
+                pctVal = 0;
+                progressInner.style.width = "0%";
+                pct.textContent = "0%";
+                meterLabel.textContent = "Data Extraction Complete";
+            }, 220);
+        } else {
+            progressInner.style.width = pctVal + "%";
+            pct.textContent = pctVal + "%";
+        }
+    }, 40);
+
+    // seed some initial lines
+    [
+        "SYSTEM BOOT: kernel v5.12.0",
+        "C:\\> system32 /scan /quick",
+        "[+] Initializing extraction modules",
+        "network: interface eth0 up",
+        "launching probe sequence..."
+    ].forEach(pushLine);
+
+})();
+</script>
 </body>
 </html>
